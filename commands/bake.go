@@ -265,7 +265,7 @@ func runBake(ctx context.Context, dockerCli command.Cli, targets []string, in ba
 	}
 
 	done := timeBuildCommand(mp, attributes)
-	resp, retErr := build.Build(ctx, nodes, bo, dockerutil.NewClient(dockerCli), confutil.ConfigDir(dockerCli), printer)
+	resp, retErr := build.Build(ctx, nodes, bo, dockerutil.NewClient(dockerCli), confutil.NewConfig(dockerCli), printer)
 	if err := printer.Wait(); retErr == nil {
 		retErr = err
 	}
@@ -464,13 +464,19 @@ func saveLocalStateGroup(dockerCli command.Cli, in bakeOptions, targets []string
 	groupRef := identity.NewID()
 	refs := make([]string, 0, len(bo))
 	for k, b := range bo {
+		if b.CallFunc != nil {
+			continue
+		}
 		b.Ref = identity.NewID()
 		b.GroupRef = groupRef
 		b.ProvenanceResponseMode = prm
 		refs = append(refs, b.Ref)
 		bo[k] = b
 	}
-	l, err := localstate.New(confutil.ConfigDir(dockerCli))
+	if len(refs) == 0 {
+		return nil
+	}
+	l, err := localstate.New(confutil.NewConfig(dockerCli))
 	if err != nil {
 		return err
 	}
@@ -621,7 +627,7 @@ func bakeMetricAttributes(dockerCli command.Cli, driverType, url, cmdContext str
 		commandNameAttribute.String("bake"),
 		attribute.Stringer(string(commandOptionsHash), &bakeOptionsHash{
 			bakeOptions: options,
-			configDir:   confutil.ConfigDir(dockerCli),
+			cfg:         confutil.NewConfig(dockerCli),
 			url:         url,
 			cmdContext:  cmdContext,
 			targets:     targets,
@@ -633,7 +639,7 @@ func bakeMetricAttributes(dockerCli command.Cli, driverType, url, cmdContext str
 
 type bakeOptionsHash struct {
 	*bakeOptions
-	configDir  string
+	cfg        *confutil.Config
 	url        string
 	cmdContext string
 	targets    []string
@@ -657,7 +663,7 @@ func (o *bakeOptionsHash) String() string {
 
 		joinedFiles := strings.Join(files, ",")
 		joinedTargets := strings.Join(targets, ",")
-		salt := confutil.TryNodeIdentifier(o.configDir)
+		salt := o.cfg.TryNodeIdentifier()
 
 		h := sha256.New()
 		for _, s := range []string{url, cmdContext, joinedFiles, joinedTargets, salt} {
